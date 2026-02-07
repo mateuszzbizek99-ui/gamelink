@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Multi-Stage Verification</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+        .shake { animation: shake 0.2s ease-in-out; }
+        @keyframes shake {
+            0%, 100% { transform: translate(0,0); }
+            25% { transform: translate(-10px, 5px); }
+            75% { transform: translate(10px, -5px); }
+        }
+        .active-pad { filter: brightness(2) scale(0.95); box-shadow: 0 0 30px white; }
+        #slingshot-line { pointer-events: none; stroke-dasharray: 5,5; }
+    </style>
+</head>
+<body class="bg-black text-white flex items-center justify-center min-h-screen p-4 font-sans select-none overflow-hidden">
+
+    <div id="wrapper" class="bg-zinc-900 p-6 rounded-[2.5rem] shadow-2xl border border-zinc-800 max-w-sm w-full text-center relative">
+        
+        <!-- Header -->
+        <div id="status" class="hidden mb-4">
+            <div class="flex justify-between items-center text-[10px] font-black uppercase tracking-widest text-zinc-500 mb-2">
+                <span id="lvl-title">Level 1</span>
+                <span id="timer">--</span>
+            </div>
+            <div class="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                <div id="bar" class="h-full bg-blue-500 transition-all duration-300 w-0"></div>
+            </div>
+        </div>
+
+        <!-- Screens -->
+        
+        <!-- 0. INTRO -->
+        <div id="screen-intro" class="">
+            <div class="mb-6 bg-blue-500/20 w-20 h-20 rounded-full flex items-center justify-center mx-auto">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m0 0v2m0-2h2m-2 0H10m4-6a4 4 0 11-8 0 4 4 0 018 0zM12 9v2m0 0v2m0-2h2m-2 0H10" />
+                </svg>
+            </div>
+            <h1 class="text-3xl font-black uppercase italic mb-2">Triple Lock</h1>
+            <p class="text-zinc-500 text-xs mb-8">Pass three different tests to reveal the destination link.</p>
+            <button onclick="initLvl1()" class="w-full bg-white text-black font-black py-4 rounded-2xl active:scale-95 transition-all uppercase">Start Sequence</button>
+        </div>
+
+        <!-- 1. LEVEL 1: MEMORY (Puzzle) -->
+        <div id="screen-lvl1" class="hidden">
+            <p class="text-sm mb-6 text-zinc-400" id="mem-msg">Watch the sequence...</p>
+            <div class="grid grid-cols-2 gap-4 aspect-square">
+                <div id="pad-0" onclick="playerTap(0)" class="bg-red-600 rounded-3xl h-32 transition-all"></div>
+                <div id="pad-1" onclick="playerTap(1)" class="bg-blue-600 rounded-3xl h-32 transition-all"></div>
+                <div id="pad-2" onclick="playerTap(2)" class="bg-green-600 rounded-3xl h-32 transition-all"></div>
+                <div id="pad-3" onclick="playerTap(3)" class="bg-yellow-600 rounded-3xl h-32 transition-all"></div>
+            </div>
+        </div>
+
+        <!-- 2. LEVEL 2: PHYSICS (Launcher) -->
+        <div id="screen-lvl2" class="hidden">
+            <p class="text-xs mb-4 text-zinc-400">Drag back to launch. Hit the target!</p>
+            <div id="physics-container" class="relative w-full aspect-square bg-zinc-950 rounded-3xl border border-zinc-800 overflow-hidden">
+                <svg id="game-canvas" class="w-full h-full">
+                    <!-- Target -->
+                    <circle id="phys-target" cx="85%" cy="15%" r="15" fill="#22c55e" class="animate-pulse" />
+                    <circle cx="85%" cy="15%" r="10" fill="white" opacity="0.5" />
+                    <!-- Projectile -->
+                    <circle id="projectile" cx="50" cy="280" r="10" fill="white" />
+                    <!-- Slingshot Line -->
+                    <line id="slingshot-line" x1="50" y1="280" x2="50" y2="280" stroke="white" stroke-width="2" class="hidden" />
+                </svg>
+                <!-- Interaction Overlay -->
+                <div id="touch-layer" class="absolute inset-0 cursor-crosshair"></div>
+            </div>
+        </div>
+
+        <!-- 3. LEVEL 3: REFLEX (Tap) -->
+        <div id="screen-lvl3" class="hidden">
+            <p class="text-xs mb-4 text-zinc-400">Targets move fast. Don't blink.</p>
+            <div id="tap-arena" class="relative w-full aspect-square bg-zinc-950 rounded-3xl border border-zinc-800 overflow-hidden">
+                <div id="mole" onclick="moleHit()" class="absolute w-12 h-12 bg-white rounded-full hidden flex items-center justify-center shadow-[0_0_20px_white]">
+                    <div class="w-2 h-2 bg-black rounded-full"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TRANSITION / FAIL / SUCCESS -->
+        <div id="screen-win" class="hidden py-8">
+            <div class="text-green-500 text-6xl mb-4 italic">DONE.</div>
+            <a href="https://example.com/ACCESS_GRANTED" class="block w-full bg-green-600 text-white font-black py-4 rounded-2xl animate-pulse text-center">ACCESS LINK</a>
+        </div>
+
+        <div id="screen-fail" class="hidden py-8">
+            <h2 class="text-3xl font-black text-red-500 italic mb-4">FAILED</h2>
+            <button onclick="location.reload()" class="w-full bg-zinc-800 text-white py-4 rounded-2xl">TRY AGAIN</button>
+        </div>
+
+    </div>
+
+    <script>
+        /* GLOBAL STATE */
+        let state = 'intro';
+        let mainTimer;
+        
+        const show = (id) => {
+            document.querySelectorAll('#wrapper > div').forEach(d => d.classList.add('hidden'));
+            document.getElementById('wrapper').classList.remove('shake');
+            document.getElementById(id).classList.remove('hidden');
+            if(id.startsWith('screen-lvl')) document.getElementById('status').classList.remove('hidden');
+            else document.getElementById('status').classList.add('hidden');
+        };
+
+        const updateBar = (p) => document.getElementById('bar').style.width = p + '%';
+        const fail = () => {
+            clearInterval(mainTimer);
+            show('screen-fail');
+        };
+
+        /* LEVEL 1: MEMORY */
+        let sequence = [];
+        let playerSeq = [];
+        let isShowing = false;
+
+        function initLvl1() {
+            show('screen-lvl1');
+            document.getElementById('lvl-title').innerText = "LVL 1: LOGIC";
+            sequence = Array.from({length: 5}, () => Math.floor(Math.random() * 4));
+            playerSeq = [];
+            setTimeout(playSequence, 1000);
+        }
+
+        async function playSequence() {
+            isShowing = true;
+            document.getElementById('mem-msg').innerText = "Watch...";
+            for (let s of sequence) {
+                await new Promise(r => setTimeout(r, 600));
+                flash(s);
+            }
+            isShowing = false;
+            document.getElementById('mem-msg').innerText = "Repeat the pattern!";
+        }
+
+        function flash(i) {
+            const pad = document.getElementById(`pad-${i}`);
+            pad.classList.add('active-pad');
+            setTimeout(() => pad.classList.remove('active-pad'), 400);
+        }
+
+        function playerTap(i) {
+            if (isShowing) return;
+            flash(i);
+            playerSeq.push(i);
+            if (playerSeq[playerSeq.length - 1] !== sequence[playerSeq.length - 1]) return fail();
+            updateBar((playerSeq.length / sequence.length) * 100);
+            if (playerSeq.length === sequence.length) setTimeout(initLvl2, 800);
+        }
+
+        /* LEVEL 2: PHYSICS (Slingshot) */
+        let isDragging = false;
+        let pPos = { x: 50, y: 280 };
+        let startPos = { x: 50, y: 280 };
+        let velocity = { x: 0, y: 0 };
+        let launched = false;
+
+        function initLvl2() {
+            show('screen-lvl2');
+            updateBar(0);
+            document.getElementById('lvl-title').innerText = "LVL 2: PHYSICS";
+            setupSlingshot();
+        }
+
+        function setupSlingshot() {
+            const touch = document.getElementById('touch-layer');
+            const proj = document.getElementById('projectile');
+            const line = document.getElementById('slingshot-line');
+            const rect = document.getElementById('physics-container').getBoundingClientRect();
+
+            const moveHandler = (e) => {
+                if (!isDragging || launched) return;
+                const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+                const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+                
+                const dx = (clientX - rect.left) - startPos.x;
+                const dy = (clientY - rect.top) - startPos.y;
+                
+                // Limited stretch
+                const dist = Math.sqrt(dx*dx + dy*dy);
+                const limit = 80;
+                const scale = dist > limit ? limit/dist : 1;
+                
+                pPos.x = startPos.x + dx * scale;
+                pPos.y = startPos.y + dy * scale;
+                
+                proj.setAttribute('cx', pPos.x);
+                proj.setAttribute('cy', pPos.y);
+                
+                line.classList.remove('hidden');
+                line.setAttribute('x2', pPos.x);
+                line.setAttribute('y2', pPos.y);
+                
+                velocity.x = (startPos.x - pPos.x) * 0.15;
+                velocity.y = (startPos.y - pPos.y) * 0.15;
+            };
+
+            touch.addEventListener('mousedown', () => isDragging = true);
+            touch.addEventListener('touchstart', (e) => { e.preventDefault(); isDragging = true; });
+            
+            window.addEventListener('mousemove', moveHandler);
+            window.addEventListener('touchmove', moveHandler);
+
+            const release = () => {
+                if (!isDragging || launched) return;
+                isDragging = false;
+                line.classList.add('hidden');
+                runPhysics();
+            };
+
+            window.addEventListener('mouseup', release);
+            window.addEventListener('touchend', release);
+        }
+
+        function runPhysics() {
+            launched = true;
+            const proj = document.getElementById('projectile');
+            const target = document.getElementById('phys-target');
+            const tx = parseFloat(target.getAttribute('cx')) / 100 * 320; // scale based on container size
+            const ty = parseFloat(target.getAttribute('cy')) / 100 * 320;
+            
+            let curX = pPos.x;
+            let curY = pPos.y;
+
+            const loop = setInterval(() => {
+                velocity.y += 0.2; // Gravity
+                curX += velocity.x;
+                curY += velocity.y;
+                
+                proj.setAttribute('cx', curX);
+                proj.setAttribute('cy', curY);
+
+                // Check hit (rough distance)
+                const d = Math.sqrt(Math.pow(curX - 272, 2) + Math.pow(curY - 48, 2));
+                if (d < 25) {
+                    clearInterval(loop);
+                    initLvl3();
+                }
+
+                // Check out of bounds
+                if (curX > 400 || curY > 400 || curX < -50) {
+                    clearInterval(loop);
+                    resetPhys();
+                }
+            }, 20);
+        }
+
+        function resetPhys() {
+            launched = false;
+            pPos = { x: 50, y: 280 };
+            const proj = document.getElementById('projectile');
+            proj.setAttribute('cx', 50);
+            proj.setAttribute('cy', 280);
+            document.getElementById('physics-container').classList.add('shake');
+            setTimeout(() => document.getElementById('physics-container').classList.remove('shake'), 200);
+        }
+
+        /* LEVEL 3: REFLEX */
+        let molesHit = 0;
+        let moleTimer;
+        let gameTime = 10.0;
+
+        function initLvl3() {
+            show('screen-lvl3');
+            updateBar(0);
+            document.getElementById('lvl-title').innerText = "LVL 3: REFLEX";
+            molesHit = 0;
+            
+            mainTimer = setInterval(() => {
+                gameTime -= 0.1;
+                document.getElementById('timer').innerText = gameTime.toFixed(1) + 's';
+                if(gameTime <= 0) fail();
+            }, 100);
+            
+            spawnMole();
+        }
+
+        function spawnMole() {
+            const mole = document.getElementById('mole');
+            const arena = document.getElementById('tap-arena');
+            
+            mole.classList.remove('hidden');
+            mole.style.left = Math.random() * (arena.clientWidth - 50) + 'px';
+            mole.style.top = Math.random() * (arena.clientHeight - 50) + 'px';
+            
+            // Mole stays for less time as you progress
+            clearTimeout(moleTimer);
+            moleTimer = setTimeout(() => {
+                mole.classList.add('hidden');
+                if(molesHit < 10) spawnMole();
+            }, Math.max(400, 1000 - (molesHit * 80)));
+        }
+
+        function moleHit() {
+            molesHit++;
+            updateBar((molesHit / 10) * 100);
+            document.getElementById('mole').classList.add('hidden');
+            if (molesHit >= 10) {
+                clearInterval(mainTimer);
+                show('screen-win');
+            } else {
+                spawnMole();
+            }
+        }
+
+    </script>
+</body>
+</html>
